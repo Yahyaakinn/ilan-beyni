@@ -176,5 +176,5 @@ def main():
     print("Yeni gönderilen ilan:", len(new_items))
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()

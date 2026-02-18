@@ -26,10 +26,7 @@ jobs:
       # 🔥 FIREBASE SERVICE ACCOUNT DOSYASI
       - name: Firebase key yaz
         run: |
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
+          echo "${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}" | tr -d '\r' | base64 --decode > service-account.json
 
       - name: Scripti çalıştır
-        env:
-          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_SERVICE_ACCOUNT: service-account.json
         run: python checker.py

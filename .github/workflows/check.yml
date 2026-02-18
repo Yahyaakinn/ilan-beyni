@@ -10,7 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Repo checkout
+        uses: actions/checkout@v4
 
       - name: Python kur
         uses: actions/setup-python@v5
@@ -20,7 +21,15 @@ jobs:
       - name: Paketleri kur
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests beautifulsoup4 google-auth
+
+      # 🔥 FIREBASE SERVICE ACCOUNT DOSYASI
+      - name: Firebase key yaz
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}' > service-account.json
 
       - name: Scripti çalıştır
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT: service-account.json
         run: python checker.py

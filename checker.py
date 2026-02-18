@@ -11,7 +11,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-# 🔥 ENV + FALLBACK AYARLARI (SORUN BURADAYDI)
 PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
 SERVICE_ACCOUNT_FILE = "service-account.json"
 
@@ -57,13 +56,39 @@ def send_fcm(topic, data):
     print(f"📣 FCM → {topic} | {data['title']}")
 
     access_token = get_access_token()
-
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
 
     payload = {
         "message": {
             "topic": topic,
-            "data": data
+
+            # 🔥 UYGULAMA KAPALIYKEN BİLDİRİMİ BU ALAN ÜRETİR
+            "notification": {
+                "title": data["title"],
+                "body": f"{data['examType']} • {data['deadlineText']}"
+            },
+
+            # 🔥 UYGULAMA AÇIKKEN / TIKLANINCA KULLANILIR
+            "data": {
+                "examType": data["examType"],
+                "city": data["city"],
+                "deadlineText": data["deadlineText"],
+                "url": data["url"]
+            },
+
+            # 🔥 ANDROID ÖNCELİK
+            "android": {
+                "priority": "HIGH"
+            },
+
+            # 🔥 iOS (APNS)
+            "apns": {
+                "payload": {
+                    "aps": {
+                        "sound": "default"
+                    }
+                }
+            }
         }
     }
 
@@ -180,5 +205,5 @@ def main():
     print("Toplam ilan:", len(new_items) + len(old_news))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

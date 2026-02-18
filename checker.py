@@ -2,6 +2,7 @@ import requests
 import json
 import os
 from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -33,6 +34,14 @@ SOURCES = [
 ]
 
 DATA_FILE = "news.json"
+
+
+def detect_exam_type(title):
+    t = title.lower()
+    for e in EXAMS:
+        if e in t:
+            return e.upper()
+    return "GENEL"
 
 
 def is_exam_news(title):
@@ -77,9 +86,28 @@ def scrape_site(url, source):
     return results
 
 
-def send_push(item):
+def send_push_event(item):
     if not os.getenv("ONESIGNAL_APP_ID"):
         return
+
+    payload = {
+        "app_id": os.getenv("ONESIGNAL_APP_ID"),
+        "included_segments": ["All"],
+        "headings": {"en": "Yeni Sınav / Alım"},
+        "contents": {"en": item["title"]},
+        "data": {
+            "title": item["title"],
+            "description": item["title"],
+            "examType": detect_exam_type(item["title"]),
+            "city": "TÜRKİYE GENELİ",
+            "education": "Genel",
+            "startDate": datetime.now().isoformat(),
+            "endDate": (datetime.now() + timedelta(days=7)).isoformat(),
+            "source": item["source"],
+            "sourceUrl": item["link"],
+            "url": item["link"]
+        }
+    }
 
     requests.post(
         "https://onesignal.com/api/v1/notifications",
@@ -87,13 +115,7 @@ def send_push(item):
             "Authorization": f"Basic {os.getenv('ONESIGNAL_API_KEY')}",
             "Content-Type": "application/json"
         },
-        json={
-            "app_id": os.getenv("ONESIGNAL_APP_ID"),
-            "included_segments": ["All"],
-            "headings": {"en": "Yeni Sınav / Alım"},
-            "contents": {"en": item["title"]},
-            "data": {"url": item["link"]}
-        }
+        json=payload
     )
 
 
@@ -113,7 +135,7 @@ def main():
                 seen.add(item["link"])
 
     if new_items:
-        send_push(new_items[0])
+        send_push_event(new_items[0])
 
     all_news = new_items + old_news
 
@@ -123,5 +145,5 @@ def main():
     print("Toplam ilan:", len(all_news))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

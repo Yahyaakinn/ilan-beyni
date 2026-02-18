@@ -3,10 +3,19 @@ import json
 import os
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+
+# ================== CONFIG ==================
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
+
+PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")
+SERVICE_ACCOUNT_FILE = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+
+DATA_FILE = "news.json"
 
 EXAMS = [
     "yks","tyt","ayt","ydt",
@@ -33,8 +42,47 @@ SOURCES = [
     ("https://www.milliyet.com.tr/", "Milliyet")
 ]
 
-DATA_FILE = "news.json"
+# ================== FIREBASE ==================
 
+def get_access_token():
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE,
+        scopes=["https://www.googleapis.com/auth/firebase.messaging"]
+    )
+    credentials.refresh(Request())
+    return credentials.token
+
+
+def send_fcm(topic, data):
+    print("📣 FCM →", topic, "|", data["title"])
+
+    access_token = get_access_token()
+
+    url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
+
+    payload = {
+        "message": {
+            "topic": topic,
+            "data": data
+        }
+    }
+
+    res = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        },
+        json=payload,
+        timeout=15
+    )
+
+    print("FCM STATUS:", res.status_code)
+    if res.status_code != 200:
+        print(res.text)
+
+
+# ================== SCRAPER ==================
 
 def detect_exam_type(title):
     t = title.lower()
@@ -84,41 +132,7 @@ def scrape_site(url, source):
     return results
 
 
-def send_push_event(item):
-    if not os.getenv("ONESIGNAL_APP_ID") or not os.getenv("ONESIGNAL_API_KEY"):
-        print("⚠️ OneSignal ENV eksik, push atlanıyor")
-        return
-
-    print("📣 PUSH GÖNDERİLİYOR:", item["title"])
-
-    payload = {
-        "app_id": os.getenv("ONESIGNAL_APP_ID"),
-        "included_segments": ["All"],
-        "headings": {"en": "Yeni Sınav / Alım"},
-        "contents": {"en": item["title"]},
-        "data": {
-            "title": item["title"],
-            "description": item["title"],
-            "examType": detect_exam_type(item["title"]),
-            "city": "TÜRKİYE GENELİ",
-            "education": "Genel",
-            "startDate": datetime.now().isoformat(),
-            "endDate": (datetime.now() + timedelta(days=7)).isoformat(),
-            "source": item["source"],
-            "sourceUrl": item["link"],
-            "url": item["link"]
-        }
-    }
-
-    requests.post(
-        "https://onesignal.com/api/v1/notifications",
-        headers={
-            "Authorization": f"Basic {os.getenv('ONESIGNAL_API_KEY')}",
-            "Content-Type": "application/json"
-        },
-        json=payload
-    )
-
+# ================== MAIN ==================
 
 def main():
     old_news = []
@@ -135,23 +149,35 @@ def main():
                 new_items.append(item)
                 seen.add(item["link"])
 
-    # 🔥 TEST PUSH (BİR KERE ÇALIŞIR)
-    send_push_event({
-        "source": "TEST",
-        "title": "🔥 TEST BİLDİRİMİ – SİSTEM ÇALIŞIYOR",
-        "link": "https://www.osym.gov.tr/"
-    })
+    # 🔥 TEST BİLDİRİMİ
+    send_fcm(
+        topic="kpss",
+        data={
+            "title": "🔥 TEST BİLDİRİMİ",
+            "examType": "KPSS",
+            "city": "TÜRKİYE GENELİ",
+            "deadlineText": "Bugün 23:59",
+            "url": "https://www.osym.gov.tr"
+        }
+    )
 
-    if new_items:
-        send_push_event(new_items[0])
-
-    all_news = new_items + old_news
+    for item in new_items[:3]:
+        send_fcm(
+            topic=detect_exam_type(item["title"]).lower(),
+            data={
+                "title": item["title"],
+                "examType": detect_exam_type(item["title"]),
+                "city": "TÜRKİYE GENELİ",
+                "deadlineText": "Son gün yaklaşıyor",
+                "url": item["link"]
+            }
+        )
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_news, f, ensure_ascii=False, indent=2)
+        json.dump(new_items + old_news, f, ensure_ascii=False, indent=2)
 
-    print("Toplam ilan:", len(all_news))
+    print("Toplam ilan:", len(new_items) + len(old_news))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

@@ -11,9 +11,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-# 🔥 ENV + DOSYA AYARLARI
-PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")  # GitHub Secret'tan geliyor
-SERVICE_ACCOUNT_FILE = "service-account.json"  # Workflow'da oluşturulan dosya
+# 🔥 ENV + FALLBACK AYARLARI (SORUN BURADAYDI)
+PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
+SERVICE_ACCOUNT_FILE = "service-account.json"
 
 DATA_FILE = "news.json"
 

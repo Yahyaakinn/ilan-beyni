@@ -16,29 +16,38 @@ SERVICE_ACCOUNT_FILE = "service-account.json"
 
 DATA_FILE = "news.json"
 
+# 🔑 SINAV + PERSONEL KELİMELERİ
 EXAMS = [
     "yks","tyt","ayt","ydt",
     "kpss","ales","dgs","msü",
     "yds","e-yds","tus","ydus",
     "ekpss","dhbt","sts","mbsts",
-    "ags","hmbsts",
-    "kaymakam","sayıştay",
-    "adli yargı","idari yargı",
-    "hakimlik","savcılık",
-    "bekçi","bekçilik",
-    "polis","pmyo","pomem","paem",
-    "jandarma","sahil güvenlik",
-    "uzman erbaş","astsubay","subay",
-    "öğretmen","öğretmenlik","meb",
-    "4a","4b","sözleşmeli","kadro"
+    "ags","hmbsts"
 ]
 
+EMPLOYMENT_KEYWORDS = [
+    "personel alımı",
+    "kamu personeli",
+    "memur alımı",
+    "işçi alımı",
+    "sözleşmeli",
+    "kadro",
+    "4a",
+    "4b",
+    "4/c",
+    "3024 personel",
+    "657 sayılı",
+]
+
+# 🌐 KAYNAKLAR
 SOURCES = [
     ("https://www.osym.gov.tr/", "ÖSYM"),
     ("https://www.meb.gov.tr/", "MEB"),
     ("https://www.hurriyet.com.tr/", "Hürriyet"),
     ("https://www.sabah.com.tr/", "Sabah"),
-    ("https://www.milliyet.com.tr/", "Milliyet")
+    ("https://www.milliyet.com.tr/", "Milliyet"),
+    ("https://www.kamupersonelialimi.com/", "Kamu Personeli"),
+    ("https://www.guncelisilanlari.com/", "Güncel İş İlanları"),
 ]
 
 # ================== FIREBASE ==================
@@ -93,17 +102,28 @@ def send_fcm(topic, data):
 
 def detect_exam_type(title):
     t = title.lower()
+
+    if "4a" in t:
+        return "4A"
+    if "4b" in t:
+        return "4B"
+    if any(k in t for k in EMPLOYMENT_KEYWORDS):
+        return "PERSONEL"
+
     for e in EXAMS:
         if e in t:
             return e.upper()
+
     return "GENEL"
 
 
-def is_exam_news(title):
+def is_relevant_news(title):
     t = title.lower()
-    return any(e in t for e in EXAMS) and any(
-        k in t for k in ["sınav", "başvuru", "alım", "sonuç", "tercih", "kayıt"]
-    )
+
+    exam_match = any(e in t for e in EXAMS)
+    job_match = any(j in t for j in EMPLOYMENT_KEYWORDS)
+
+    return exam_match or job_match
 
 
 def scrape_site(url, source):
@@ -127,7 +147,7 @@ def scrape_site(url, source):
             if not link.startswith("http"):
                 link = url.rstrip("/") + "/" + link.lstrip("/")
 
-            if is_exam_news(title):
+            if is_relevant_news(title):
                 results.append({
                     "source": source,
                     "title": title,
@@ -156,11 +176,13 @@ def main():
                 new_items.append(item)
                 seen_links.add(item["link"])
 
-    # 🔔 SADECE GERÇEK YENİ HABERLER
+    # 🔔 GERÇEK YENİ HABERLER
     for item in new_items:
         exam_type = detect_exam_type(item["title"])
+        topic = exam_type.lower()
+
         send_fcm(
-            topic=exam_type.lower(),
+            topic=topic,
             data={
                 "title": item["title"],
                 "examType": exam_type,

@@ -205,5 +205,5 @@ def main():
     print("Toplam ilan:", len(new_items) + len(old_news))
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()

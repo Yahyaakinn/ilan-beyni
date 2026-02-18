@@ -147,3 +147,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+send_push({
+    "source": "TEST",
+    "title": "🔥 TEST BİLDİRİMİ – SİSTEM ÇALIŞIYOR",
+    "link": "https://www.osym.gov.tr/"
+})

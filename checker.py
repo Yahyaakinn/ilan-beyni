@@ -46,11 +46,9 @@ def detect_exam_type(title):
 
 def is_exam_news(title):
     t = title.lower()
-    has_exam = any(e in t for e in EXAMS)
-    has_action = any(k in t for k in [
-        "sınav", "başvuru", "alım", "sonuç", "tercih", "kayıt"
-    ])
-    return has_exam and has_action
+    return any(e in t for e in EXAMS) and any(
+        k in t for k in ["sınav", "başvuru", "alım", "sonuç", "tercih", "kayıt"]
+    )
 
 
 def scrape_site(url, source):
@@ -87,8 +85,11 @@ def scrape_site(url, source):
 
 
 def send_push_event(item):
-    if not os.getenv("ONESIGNAL_APP_ID"):
+    if not os.getenv("ONESIGNAL_APP_ID") or not os.getenv("ONESIGNAL_API_KEY"):
+        print("⚠️ OneSignal ENV eksik, push atlanıyor")
         return
+
+    print("📣 PUSH GÖNDERİLİYOR:", item["title"])
 
     payload = {
         "app_id": os.getenv("ONESIGNAL_APP_ID"),
@@ -134,6 +135,13 @@ def main():
                 new_items.append(item)
                 seen.add(item["link"])
 
+    # 🔥 TEST PUSH (BİR KERE ÇALIŞIR)
+    send_push_event({
+        "source": "TEST",
+        "title": "🔥 TEST BİLDİRİMİ – SİSTEM ÇALIŞIYOR",
+        "link": "https://www.osym.gov.tr/"
+    })
+
     if new_items:
         send_push_event(new_items[0])
 
@@ -145,10 +153,5 @@ def main():
     print("Toplam ilan:", len(all_news))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
-send_push({
-    "source": "TEST",
-    "title": "🔥 TEST BİLDİRİMİ – SİSTEM ÇALIŞIYOR",
-    "link": "https://www.osym.gov.tr/"
-})

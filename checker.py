@@ -2,7 +2,6 @@ import requests
 import json
 import os
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 
@@ -12,8 +11,9 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")
-SERVICE_ACCOUNT_FILE = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+# 🔥 ENV + DOSYA AYARLARI
+PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID")  # GitHub Secret'tan geliyor
+SERVICE_ACCOUNT_FILE = "service-account.json"  # Workflow'da oluşturulan dosya
 
 DATA_FILE = "news.json"
 
@@ -54,7 +54,7 @@ def get_access_token():
 
 
 def send_fcm(topic, data):
-    print("📣 FCM →", topic, "|", data["title"])
+    print(f"📣 FCM → {topic} | {data['title']}")
 
     access_token = get_access_token()
 
@@ -162,11 +162,12 @@ def main():
     )
 
     for item in new_items[:3]:
+        exam_type = detect_exam_type(item["title"])
         send_fcm(
-            topic=detect_exam_type(item["title"]).lower(),
+            topic=exam_type.lower(),
             data={
                 "title": item["title"],
-                "examType": detect_exam_type(item["title"]),
+                "examType": exam_type,
                 "city": "TÜRKİYE GENELİ",
                 "deadlineText": "Son gün yaklaşıyor",
                 "url": item["link"]
@@ -179,5 +180,5 @@ def main():
     print("Toplam ilan:", len(new_items) + len(old_news))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

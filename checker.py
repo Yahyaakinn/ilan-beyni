@@ -55,38 +55,20 @@ def get_access_token():
 def send_fcm(topic, data):
     print(f"📣 FCM → {topic} | {data['title']}")
 
-    access_token = get_access_token()
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
 
     payload = {
         "message": {
             "topic": topic,
-
-            # 🔥 UYGULAMA KAPALIYKEN BİLDİRİMİ BU ALAN ÜRETİR
             "notification": {
                 "title": data["title"],
                 "body": f"{data['examType']} • {data['deadlineText']}"
             },
-
-            # 🔥 UYGULAMA AÇIKKEN / TIKLANINCA KULLANILIR
-            "data": {
-                "examType": data["examType"],
-                "city": data["city"],
-                "deadlineText": data["deadlineText"],
-                "url": data["url"]
-            },
-
-            # 🔥 ANDROID ÖNCELİK
-            "android": {
-                "priority": "HIGH"
-            },
-
-            # 🔥 iOS (APNS)
+            "data": data,
+            "android": {"priority": "HIGH"},
             "apns": {
                 "payload": {
-                    "aps": {
-                        "sound": "default"
-                    }
+                    "aps": {"sound": "default"}
                 }
             }
         }
@@ -95,7 +77,7 @@ def send_fcm(topic, data):
     res = requests.post(
         url,
         headers={
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {get_access_token()}",
             "Content-Type": "application/json"
         },
         json=payload,
@@ -165,28 +147,17 @@ def main():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             old_news = json.load(f)
 
-    seen = {n["link"] for n in old_news}
+    seen_links = {n["link"] for n in old_news}
     new_items = []
 
     for url, source in SOURCES:
         for item in scrape_site(url, source):
-            if item["link"] not in seen:
+            if item["link"] not in seen_links:
                 new_items.append(item)
-                seen.add(item["link"])
+                seen_links.add(item["link"])
 
-    # 🔥 TEST BİLDİRİMİ
-    send_fcm(
-        topic="kpss",
-        data={
-            "title": "🔥 TEST BİLDİRİMİ",
-            "examType": "KPSS",
-            "city": "TÜRKİYE GENELİ",
-            "deadlineText": "Bugün 23:59",
-            "url": "https://www.osym.gov.tr"
-        }
-    )
-
-    for item in new_items[:3]:
+    # 🔔 SADECE GERÇEK YENİ HABERLER
+    for item in new_items:
         exam_type = detect_exam_type(item["title"])
         send_fcm(
             topic=exam_type.lower(),
@@ -194,7 +165,7 @@ def main():
                 "title": item["title"],
                 "examType": exam_type,
                 "city": "TÜRKİYE GENELİ",
-                "deadlineText": "Son gün yaklaşıyor",
+                "deadlineText": "Yeni ilan yayınlandı",
                 "url": item["link"]
             }
         )
@@ -202,8 +173,8 @@ def main():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(new_items + old_news, f, ensure_ascii=False, indent=2)
 
-    print("Toplam ilan:", len(new_items) + len(old_news))
+    print("Yeni gönderilen ilan:", len(new_items))
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

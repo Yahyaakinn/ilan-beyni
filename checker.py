@@ -198,5 +198,5 @@ def main():
     print(f"✅ Yeni gönderilen bildirim: {len(new_ids)}")
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()

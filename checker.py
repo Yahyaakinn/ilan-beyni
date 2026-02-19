@@ -15,7 +15,7 @@ HEADERS = {
 
 PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
 SERVICE_ACCOUNT_FILE = "service-account.json"
-DATA_FILE = "news.json"
+DATA_FILE = "sent_news.json"
 
 # 🔑 SINAVLAR
 EXAMS = [
@@ -40,15 +40,12 @@ EMPLOYMENT_KEYWORDS = [
     "657 sayılı"
 ]
 
-# 🌐 KAYNAKLAR
+# 🌐 SADECE RESMÎ / GÜVENİLİR KAYNAKLAR
 SOURCES = [
     ("https://www.osym.gov.tr/", "ÖSYM"),
     ("https://www.meb.gov.tr/", "MEB"),
-    ("https://www.hurriyet.com.tr/", "Hürriyet"),
-    ("https://www.sabah.com.tr/", "Sabah"),
-    ("https://www.milliyet.com.tr/", "Milliyet"),
+    ("https://www.iskur.gov.tr/", "İŞKUR"),
     ("https://www.kamupersonelialimi.com/", "Kamu Personeli"),
-    ("https://www.guncelisilanlari.com/", "Güncel İş İlanları"),
 ]
 
 # ================== FIREBASE ==================
@@ -74,9 +71,12 @@ def send_fcm(topic, data):
                 "title": data["title"],
                 "body": f"{data['examType']} • Yeni ilan"
             },
-            "data": data,
-            "android": {"priority": "HIGH"},
-            "apns": {"payload": {"aps": {"sound": "default"}}}
+            "data": {
+                "examType": data["examType"],
+                "url": data["url"],
+                "source": data["source"]
+            },
+            "android": {"priority": "HIGH"}
         }
     }
 
@@ -90,9 +90,9 @@ def send_fcm(topic, data):
         timeout=15
     )
 
-    print("FCM STATUS:", res.status_code)
     if res.status_code != 200:
-        print(res.text)
+        print("❌ FCM HATA:", res.text)
+
 
 # ================== SCRAPER ==================
 
@@ -133,9 +133,9 @@ def scrape_site(url, source):
             title = " ".join(a.get_text().split())
             link = a.get("href")
 
-            if not title or len(title) < 20:
+            if not title or len(title) < 25:
                 continue
-            if not link or link.endswith(".pdf"):
+            if not link:
                 continue
 
             if not link.startswith("http"):
@@ -149,57 +149,54 @@ def scrape_site(url, source):
                     "source": source,
                     "createdAt": datetime.utcnow().isoformat()
                 })
+
     except Exception as e:
-        print(source, "hata:", e)
+        print(f"❌ {source} hata:", e)
 
     return results
+
 
 # ================== MAIN ==================
 
 def main():
-    # 📦 DAHA ÖNCE BİLDİRİM ATILAN HABERLER
-    sent_news = []
+    # 📦 DAHA ÖNCE GÖNDERİLENLER (KALICI HAFIZA)
+    sent_ids = set()
+
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            sent_news = json.load(f)
+            sent_ids = set(json.load(f))
 
-    sent_ids = {n["id"] for n in sent_news}
-    newly_sent = []
+    new_ids = []
 
-    # 🌐 TÜM KAYNAKLARI TARA
     for url, source in SOURCES:
-        for item in scrape_site(url, source):
+        news = scrape_site(url, source)
 
-            # ❌ ÖNCE GÖNDERİLDİYSE GEÇ
+        for item in news:
             if item["id"] in sent_ids:
-                continue
+                continue  # ❌ DAHA ÖNCE GÖNDERİLDİ → BLOKLA
 
-            # ✅ YENİ HABER → BİLDİRİM
             exam_type = detect_exam_type(item["title"])
-            topic = exam_type.lower()
 
             send_fcm(
-                topic=topic,
+                topic=exam_type.lower(),
                 data={
                     "title": item["title"],
                     "examType": exam_type,
-                    "city": "TÜRKİYE GENELİ",
-                    "deadlineText": "Yeni ilan yayınlandı",
                     "url": item["link"],
                     "source": item["source"]
                 }
             )
 
-            newly_sent.append(item)
             sent_ids.add(item["id"])
+            new_ids.append(item["id"])
 
-    # 💾 SADECE BİLDİRİM ATILANLARI KAYDET
-    if newly_sent:
+    # 💾 HAFIZAYA KAYDET (BİR DAHA ASLA GÖNDERMEZ)
+    if new_ids:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(sent_news + newly_sent, f, ensure_ascii=False, indent=2)
+            json.dump(list(sent_ids), f, indent=2)
 
-    print("✅ Yeni gönderilen ilan:", len(newly_sent))
+    print(f"✅ Yeni gönderilen bildirim: {len(new_ids)}")
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

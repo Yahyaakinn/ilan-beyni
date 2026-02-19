@@ -1,6 +1,8 @@
 import requests
 import json
 import os
+import hashlib
+from datetime import datetime
 from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
@@ -14,7 +16,7 @@ HEADERS = {
 PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
 SERVICE_ACCOUNT_FILE = "service-account.json"
 
-DATA_FILE = "news.json"
+DATA_FILE = "news.json"  # STATE DOSYASI
 
 # 🔑 SINAV + PERSONEL KELİMELERİ
 EXAMS = [
@@ -35,11 +37,10 @@ EMPLOYMENT_KEYWORDS = [
     "4a",
     "4b",
     "4/c",
-    "3024 personel",
-    "657 sayılı",
+    "657 sayılı"
 ]
 
-# 🌐 KAYNAKLAR
+# 🌐 KAYNAKLAR (KAYNAK ZORUNLU)
 SOURCES = [
     ("https://www.osym.gov.tr/", "ÖSYM"),
     ("https://www.meb.gov.tr/", "MEB"),
@@ -71,7 +72,7 @@ def send_fcm(topic, data):
             "topic": topic,
             "notification": {
                 "title": data["title"],
-                "body": f"{data['examType']} • {data['deadlineText']}"
+                "body": f"{data['examType']} • Yeni ilan"
             },
             "data": data,
             "android": {"priority": "HIGH"},
@@ -97,8 +98,16 @@ def send_fcm(topic, data):
     if res.status_code != 200:
         print(res.text)
 
-
 # ================== SCRAPER ==================
+
+def generate_news_id(title, source):
+    """
+    🔑 TEKİL HABER KİMLİĞİ
+    Aynı başlık + aynı kaynak = TEK HABER
+    """
+    raw = f"{title.lower().strip()}|{source.lower().strip()}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
 
 def detect_exam_type(title):
     t = title.lower()
@@ -119,11 +128,7 @@ def detect_exam_type(title):
 
 def is_relevant_news(title):
     t = title.lower()
-
-    exam_match = any(e in t for e in EXAMS)
-    job_match = any(j in t for j in EMPLOYMENT_KEYWORDS)
-
-    return exam_match or job_match
+    return any(e in t for e in EXAMS) or any(j in t for j in EMPLOYMENT_KEYWORDS)
 
 
 def scrape_site(url, source):
@@ -133,9 +138,6 @@ def scrape_site(url, source):
         soup = BeautifulSoup(r.text, "html.parser")
 
         for a in soup.find_all("a"):
-            if len(results) >= 10:
-                break
-
             title = " ".join(a.get_text().split())
             link = a.get("href")
 
@@ -149,34 +151,44 @@ def scrape_site(url, source):
 
             if is_relevant_news(title):
                 results.append({
-                    "source": source,
+                    "id": generate_news_id(title, source),
                     "title": title,
-                    "link": link
+                    "link": link,
+                    "source": source,
+                    "createdAt": datetime.utcnow().isoformat()
                 })
     except Exception as e:
         print(source, "hata:", e)
 
     return results
 
-
 # ================== MAIN ==================
 
 def main():
+    # 📦 ÖNCEKİ STATE
     old_news = []
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             old_news = json.load(f)
 
-    seen_links = {n["link"] for n in old_news}
+    seen_ids = {n["id"] for n in old_news}
     new_items = []
 
+    # 🌐 TÜM KAYNAKLARI TARA
     for url, source in SOURCES:
         for item in scrape_site(url, source):
-            if item["link"] not in seen_links:
+            if item["id"] not in seen_ids:
                 new_items.append(item)
-                seen_links.add(item["link"])
+                seen_ids.add(item["id"])
 
-    # 🔔 GERÇEK YENİ HABERLER
+    # 🚫 İLK ÇALIŞTIRMA KORUMASI
+    if not old_news:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(new_items, f, ensure_ascii=False, indent=2)
+        print("📦 İlk çalıştırma: state oluşturuldu, bildirim atılmadı.")
+        return
+
+    # 🔔 SADECE GERÇEKTEN YENİ HABERLER
     for item in new_items:
         exam_type = detect_exam_type(item["title"])
         topic = exam_type.lower()
@@ -188,14 +200,16 @@ def main():
                 "examType": exam_type,
                 "city": "TÜRKİYE GENELİ",
                 "deadlineText": "Yeni ilan yayınlandı",
-                "url": item["link"]
+                "url": item["link"],
+                "source": item["source"]
             }
         )
 
+    # 💾 STATE GÜNCELLE
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(new_items + old_news, f, ensure_ascii=False, indent=2)
 
-    print("Yeni gönderilen ilan:", len(new_items))
+    print("✅ Yeni gönderilen ilan:", len(new_items))
 
 
 if __name__ == "__main__":

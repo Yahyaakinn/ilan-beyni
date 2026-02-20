@@ -17,7 +17,7 @@ PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
 SERVICE_ACCOUNT_FILE = "service-account.json"
 DATA_FILE = "sent_news.json"
 
-# 🔑 SINAVLAR
+# 🔑 SINAVLAR (KPSS DAHİL – AYNI)
 EXAMS = [
     "yks","tyt","ayt","ydt",
     "kpss","ales","dgs","msü",
@@ -26,26 +26,10 @@ EXAMS = [
     "ags","hmbsts"
 ]
 
-# 🔑 PERSONEL
-EMPLOYMENT_KEYWORDS = [
-    "personel alımı",
-    "kamu personeli",
-    "memur alımı",
-    "işçi alımı",
-    "sözleşmeli",
-    "kadro",
-    "4a",
-    "4b",
-    "4/c",
-    "657 sayılı"
-]
-
-# 🌐 SADECE RESMÎ / GÜVENİLİR KAYNAKLAR
+# 🌐 SADECE RESMÎ KAYNAKLAR (PERSONEL SİTELERİ YOK)
 SOURCES = [
     ("https://www.osym.gov.tr/", "ÖSYM"),
     ("https://www.meb.gov.tr/", "MEB"),
-    ("https://www.iskur.gov.tr/", "İŞKUR"),
-    ("https://www.kamupersonelialimi.com/", "Kamu Personeli"),
 ]
 
 # ================== FIREBASE ==================
@@ -69,7 +53,7 @@ def send_fcm(topic, data):
             "topic": topic,
             "notification": {
                 "title": data["title"],
-                "body": f"{data['examType']} • Yeni ilan"
+                "body": f"{data['examType']} • Yeni duyuru"
             },
             "data": {
                 "examType": data["examType"],
@@ -103,24 +87,15 @@ def generate_news_id(title, source):
 
 def detect_exam_type(title):
     t = title.lower()
-
-    if "4a" in t:
-        return "4A"
-    if "4b" in t:
-        return "4B"
-    if any(k in t for k in EMPLOYMENT_KEYWORDS):
-        return "PERSONEL"
-
     for e in EXAMS:
         if e in t:
             return e.upper()
-
     return "GENEL"
 
 
 def is_relevant_news(title):
     t = title.lower()
-    return any(e in t for e in EXAMS) or any(k in t for k in EMPLOYMENT_KEYWORDS)
+    return any(e in t for e in EXAMS)
 
 
 def scrape_site(url, source):
@@ -159,7 +134,6 @@ def scrape_site(url, source):
 # ================== MAIN ==================
 
 def main():
-    # 📦 DAHA ÖNCE GÖNDERİLENLER (KALICI HAFIZA)
     sent_ids = set()
 
     if os.path.exists(DATA_FILE):
@@ -173,7 +147,7 @@ def main():
 
         for item in news:
             if item["id"] in sent_ids:
-                continue  # ❌ DAHA ÖNCE GÖNDERİLDİ → BLOKLA
+                continue
 
             exam_type = detect_exam_type(item["title"])
 
@@ -190,7 +164,6 @@ def main():
             sent_ids.add(item["id"])
             new_ids.append(item["id"])
 
-    # 💾 HAFIZAYA KAYDET (BİR DAHA ASLA GÖNDERMEZ)
     if new_ids:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(list(sent_ids), f, indent=2)
@@ -198,5 +171,5 @@ def main():
     print(f"✅ Yeni gönderilen bildirim: {len(new_ids)}")
 
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

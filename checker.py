@@ -17,7 +17,7 @@ PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
 SERVICE_ACCOUNT_FILE = "service-account.json"
 DATA_FILE = "sent_news.json"
 
-# 🔑 SINAVLAR (KPSS DAHİL – AYNI)
+# 🔑 SINAVLAR
 EXAMS = [
     "yks","tyt","ayt","ydt",
     "kpss","ales","dgs","msü",
@@ -26,10 +26,10 @@ EXAMS = [
     "ags","hmbsts"
 ]
 
-# 🌐 SADECE RESMÎ KAYNAKLAR (PERSONEL SİTELERİ YOK)
+# 🎯 SADECE RESMÎ DUYURU SAYFALARI
 SOURCES = [
-    ("https://www.osym.gov.tr/", "ÖSYM"),
-    ("https://www.meb.gov.tr/", "MEB"),
+    ("https://www.osym.gov.tr/TR,0/duyurular.html", "ÖSYM"),
+    ("https://www.meb.gov.tr/duyurular/", "MEB"),
 ]
 
 # ================== FIREBASE ==================
@@ -77,7 +77,6 @@ def send_fcm(topic, data):
     if res.status_code != 200:
         print("❌ FCM HATA:", res.text)
 
-
 # ================== SCRAPER ==================
 
 def generate_news_id(title, source):
@@ -104,11 +103,14 @@ def scrape_site(url, source):
         r = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
 
-        for a in soup.find_all("a"):
+        # sadece duyuru linkleri
+        links = soup.select("a")
+
+        for a in links[:30]:  # performans için ilk 30
             title = " ".join(a.get_text().split())
             link = a.get("href")
 
-            if not title or len(title) < 25:
+            if not title or len(title) < 20:
                 continue
             if not link:
                 continue

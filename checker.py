@@ -6,6 +6,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
+from urllib.parse import urljoin
 
 # ================== CONFIG ==================
 
@@ -26,10 +27,10 @@ EXAMS = [
     "ags","hmbsts"
 ]
 
-# 🎯 SADECE RESMÎ DUYURU SAYFALARI
+# 🎯 RESMÎ DUYURU SAYFALARI (GÜNCEL)
 SOURCES = [
-    ("https://www.osym.gov.tr/TR,0/duyurular.html", "ÖSYM"),
-    ("https://www.meb.gov.tr/duyurular/", "MEB"),
+    ("https://www.osym.gov.tr/TR,33759/2026.html", "ÖSYM"),
+    ("https://www.meb.gov.tr/meb_duyuruindex.php", "MEB"),
 ]
 
 # ================== FIREBASE ==================
@@ -77,6 +78,7 @@ def send_fcm(topic, data):
     if res.status_code != 200:
         print("❌ FCM HATA:", res.text)
 
+
 # ================== SCRAPER ==================
 
 def generate_news_id(title, source):
@@ -99,14 +101,15 @@ def is_relevant_news(title):
 
 def scrape_site(url, source):
     results = []
+
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
+        r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # sadece duyuru linkleri
-        links = soup.select("a")
+        links = soup.find_all("a")
 
-        for a in links[:30]:  # performans için ilk 30
+        for a in links[:40]:  # ilk 40 link
             title = " ".join(a.get_text().split())
             link = a.get("href")
 
@@ -115,8 +118,8 @@ def scrape_site(url, source):
             if not link:
                 continue
 
-            if not link.startswith("http"):
-                link = url.rstrip("/") + "/" + link.lstrip("/")
+            # düzgün link birleştirme
+            link = urljoin(url, link)
 
             if is_relevant_news(title):
                 results.append({
@@ -145,6 +148,7 @@ def main():
     new_ids = []
 
     for url, source in SOURCES:
+        print(f"🔎 {source} taranıyor...")
         news = scrape_site(url, source)
 
         for item in news:

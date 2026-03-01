@@ -40,6 +40,10 @@ SOURCES = [
 (“https://www.meb.gov.tr/meb_duyuruindex.php”, “MEB”),
 ]
 
+# Resmi Gazete ayrı bir fonksiyonla taranıyor (özel URL yapısı)
+
+RESMI_GAZETE_BASE = “https://www.resmigazete.gov.tr”
+
 # ================== TOKEN CACHE ==================
 
 _cached_token = None
@@ -204,6 +208,93 @@ except Exception as e:
 return results
 
 
+# ================== RESMİ GAZETE SCRAPER ==================
+
+def scrape_resmi_gazete():
+“””
+Resmi Gazete’nin güncel sayısını tarar.
+URL formatı: https://www.resmigazete.gov.tr/eskiler/YYYY/MM/YYYYMMDD.htm
+“””
+results = []
+source = “Resmî Gazete”
+
+
+# Bugün ve dün için dene (hafta sonu yayımlanmayabilir)
+from datetime import timedelta
+dates_to_try = [
+    datetime.utcnow(),
+    datetime.utcnow() - timedelta(days=1),
+    datetime.utcnow() - timedelta(days=2),
+    datetime.utcnow() - timedelta(days=3),
+]
+
+for dt in dates_to_try:
+    year = dt.strftime("%Y")
+    month = dt.strftime("%m")
+    day = dt.strftime("%Y%m%d")
+    url = f"{RESMI_GAZETE_BASE}/eskiler/{year}/{month}/{day}.htm"
+
+    print(f"  🌐 Resmî Gazete deneniyor: {url}")
+
+    try:
+        session = requests.Session()
+        session.headers.update(HEADERS)
+
+        r = session.get(url, timeout=20)
+
+        if r.status_code == 404:
+            print(f"  ⚠️ {day} sayısı bulunamadı (muhtemelen yayımlanmadı), önceki gün deneniyor...")
+            continue
+
+        r.raise_for_status()
+        r.encoding = "windows-1254"  # Resmi Gazete genellikle bu encoding kullanır
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        links = soup.find_all("a", href=True)
+        print(f"  📄 Resmî Gazete toplam link: {len(links)}")
+
+        found = 0
+        for a in links:
+            title = " ".join(a.get_text().split()).strip()
+            link = a.get("href", "").strip()
+
+            if not title or len(title) < 15:
+                continue
+            if not link or link.startswith("javascript:") or link == "#":
+                continue
+
+            link = urljoin(url, link)
+
+            if is_relevant_news(title):
+                news_id = generate_news_id(title, source)
+                results.append({
+                    "id": news_id,
+                    "title": title,
+                    "link": link,
+                    "source": source,
+                    "createdAt": datetime.utcnow().isoformat()
+                })
+                found += 1
+                print(f"  ✔ Resmî Gazete haberi: {title[:80]}")
+
+        print(f"  📊 Resmî Gazete {day}: {found} ilgili haber bulundu")
+
+        # Başarılı olduysa döngüden çık
+        break
+
+    except requests.exceptions.ConnectionError:
+        print(f"  ❌ Resmî Gazete bağlantı hatası")
+        break
+    except requests.exceptions.Timeout:
+        print(f"  ❌ Resmî Gazete zaman aşımı")
+        break
+    except Exception as e:
+        print(f"  ❌ Resmî Gazete beklenmeyen hata: {e}")
+        break
+
+return results
+
+
 # ================== MAIN ==================
 
 def main():
@@ -238,6 +329,11 @@ for url, source in SOURCES:
     print(f"\n🔎 {source} taranıyor...")
     news = scrape_site(url, source)
     all_news.extend(news)
+
+# Resmî Gazete'yi tara
+print(f"\n🔎 Resmî Gazete taranıyor...")
+rg_news = scrape_resmi_gazete()
+all_news.extend(rg_news)
 
 print(f"\n📋 Toplam bulunan haber: {len(all_news)}")
 

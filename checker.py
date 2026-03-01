@@ -223,5 +223,5 @@ def main():
 
     print(f"✅ İşlem tamamlandı. Yeni gönderilen bildirim: {new_count}")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     main()

@@ -2,7 +2,7 @@ import requests
 import json
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
@@ -22,25 +22,19 @@ PROJECT_ID = os.getenv(“FIREBASE_PROJECT_ID”) or “naberr-6f4e4”
 SERVICE_ACCOUNT_FILE = “service-account.json”
 DATA_FILE = “sent_news.json”
 
-# 🔑 SINAVLAR
-
 EXAMS = [
 “yks”, “tyt”, “ayt”, “ydt”,
-“kpss”, “ales”, “dgs”, “msü”,
+“kpss”, “ales”, “dgs”, “msu”,
 “yds”, “e-yds”, “tus”, “ydus”,
 “ekpss”, “dhbt”, “sts”, “mbsts”,
 “ags”, “hmbsts”
 ]
 
-# 🎯 RESMÎ DUYURU SAYFALARI
-
 SOURCES = [
-(“https://www.osym.gov.tr/TR,33759/2026.html”, “ÖSYM”),
-(“https://www.osym.gov.tr/TR,6/duyurular.html”, “ÖSYM”),      # Yedek ÖSYM sayfası
+(“https://www.osym.gov.tr/TR,33759/2026.html”, “OSYM”),
+(“https://www.osym.gov.tr/TR,6/duyurular.html”, “OSYM”),
 (“https://www.meb.gov.tr/meb_duyuruindex.php”, “MEB”),
 ]
-
-# Resmi Gazete ayrı bir fonksiyonla taranıyor (özel URL yapısı)
 
 RESMI_GAZETE_BASE = “https://www.resmigazete.gov.tr”
 
@@ -65,8 +59,6 @@ credentials = service_account.Credentials.from_service_account_file(
 credentials.refresh(Request())
 
 _cached_token = credentials.token
-# Token'ı 50 dakika geçerli say (Google 60dk veriyor)
-from datetime import timedelta
 _token_expiry = now + timedelta(minutes=50)
 
 return _cached_token
@@ -75,7 +67,7 @@ return _cached_token
 # ================== FIREBASE ==================
 
 def send_fcm(topic, data):
-print(f”📣 FCM gönderiliyor → topic: {topic} | başlık: {data[‘title’]}”)
+print(f”FCM gonderiliyor -> topic: {topic} | baslik: {data[‘title’]}”)
 
 
 url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
@@ -85,7 +77,7 @@ payload = {
         "topic": topic,
         "notification": {
             "title": data["title"],
-            "body": f"{data['examType']} • Yeni duyuru"
+            "body": f"{data['examType']} - Yeni duyuru"
         },
         "data": {
             "examType": data["examType"],
@@ -121,12 +113,12 @@ try:
     )
 
     if res.status_code == 200:
-        print(f"✅ Bildirim gönderildi: {data['title']}")
+        print(f"Bildirim gonderildi: {data['title']}")
     else:
-        print(f"❌ FCM HATA [{res.status_code}]: {res.text}")
+        print(f"FCM HATA [{res.status_code}]: {res.text}")
 
 except Exception as e:
-    print(f"❌ FCM isteği başarısız: {e}")
+    print(f"FCM istegi basarisiz: {e}")
 
 
 # ================== SCRAPER ==================
@@ -150,7 +142,7 @@ def scrape_site(url, source):
 results = []
 
 
-print(f"  🌐 Bağlanılıyor: {url}")
+print(f"  Baglaniliyor: {url}")
 
 try:
     session = requests.Session()
@@ -158,28 +150,22 @@ try:
 
     r = session.get(url, timeout=20)
     r.raise_for_status()
-    r.encoding = r.apparent_encoding  # Türkçe karakter düzeltme
+    r.encoding = r.apparent_encoding
 
     soup = BeautifulSoup(r.text, "html.parser")
-
-    # Tüm linkleri tara (limit kaldırıldı)
     links = soup.find_all("a", href=True)
-    print(f"  📄 Toplam link bulundu: {len(links)}")
+    print(f"  Toplam link bulundu: {len(links)}")
 
     found = 0
     for a in links:
         title = " ".join(a.get_text().split()).strip()
         link = a.get("href", "").strip()
 
-        # Boş veya çok kısa başlıkları atla
         if not title or len(title) < 15:
             continue
-
-        # Boş veya javascript: linklerini atla
         if not link or link.startswith("javascript:") or link == "#":
             continue
 
-        # Tam URL yap
         link = urljoin(url, link)
 
         if is_relevant_news(title):
@@ -192,35 +178,29 @@ try:
                 "createdAt": datetime.utcnow().isoformat()
             })
             found += 1
-            print(f"  ✔ Haber bulundu: {title[:80]}")
+            print(f"  Haber bulundu: {title[:80]}")
 
-    print(f"  📊 {source}: {found} ilgili haber bulundu")
+    print(f"  {source}: {found} ilgili haber bulundu")
 
 except requests.exceptions.ConnectionError:
-    print(f"  ❌ {source} bağlantı hatası: Siteye ulaşılamıyor")
+    print(f"  {source} baglanti hatasi")
 except requests.exceptions.Timeout:
-    print(f"  ❌ {source} zaman aşımı: Site yanıt vermiyor")
+    print(f"  {source} zaman asimi")
 except requests.exceptions.HTTPError as e:
-    print(f"  ❌ {source} HTTP hatası: {e}")
+    print(f"  {source} HTTP hatasi: {e}")
 except Exception as e:
-    print(f"  ❌ {source} beklenmeyen hata: {e}")
+    print(f"  {source} beklenmeyen hata: {e}")
 
 return results
 
 
-# ================== RESMİ GAZETE SCRAPER ==================
+# ================== RESMI GAZETE SCRAPER ==================
 
 def scrape_resmi_gazete():
-“””
-Resmi Gazete’nin güncel sayısını tarar.
-URL formatı: https://www.resmigazete.gov.tr/eskiler/YYYY/MM/YYYYMMDD.htm
-“””
 results = []
-source = “Resmî Gazete”
+source = “Resmi Gazete”
 
 
-# Bugün ve dün için dene (hafta sonu yayımlanmayabilir)
-from datetime import timedelta
 dates_to_try = [
     datetime.utcnow(),
     datetime.utcnow() - timedelta(days=1),
@@ -234,7 +214,7 @@ for dt in dates_to_try:
     day = dt.strftime("%Y%m%d")
     url = f"{RESMI_GAZETE_BASE}/eskiler/{year}/{month}/{day}.htm"
 
-    print(f"  🌐 Resmî Gazete deneniyor: {url}")
+    print(f"  Resmi Gazete deneniyor: {url}")
 
     try:
         session = requests.Session()
@@ -243,15 +223,15 @@ for dt in dates_to_try:
         r = session.get(url, timeout=20)
 
         if r.status_code == 404:
-            print(f"  ⚠️ {day} sayısı bulunamadı (muhtemelen yayımlanmadı), önceki gün deneniyor...")
+            print(f"  {day} sayisi bulunamadi, onceki gun deneniyor...")
             continue
 
         r.raise_for_status()
-        r.encoding = "windows-1254"  # Resmi Gazete genellikle bu encoding kullanır
+        r.encoding = "windows-1254"
 
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.find_all("a", href=True)
-        print(f"  📄 Resmî Gazete toplam link: {len(links)}")
+        print(f"  Resmi Gazete toplam link: {len(links)}")
 
         found = 0
         for a in links:
@@ -275,21 +255,19 @@ for dt in dates_to_try:
                     "createdAt": datetime.utcnow().isoformat()
                 })
                 found += 1
-                print(f"  ✔ Resmî Gazete haberi: {title[:80]}")
+                print(f"  Resmi Gazete haberi: {title[:80]}")
 
-        print(f"  📊 Resmî Gazete {day}: {found} ilgili haber bulundu")
-
-        # Başarılı olduysa döngüden çık
+        print(f"  Resmi Gazete {day}: {found} ilgili haber bulundu")
         break
 
     except requests.exceptions.ConnectionError:
-        print(f"  ❌ Resmî Gazete bağlantı hatası")
+        print("  Resmi Gazete baglanti hatasi")
         break
     except requests.exceptions.Timeout:
-        print(f"  ❌ Resmî Gazete zaman aşımı")
+        print("  Resmi Gazete zaman asimi")
         break
     except Exception as e:
-        print(f"  ❌ Resmî Gazete beklenmeyen hata: {e}")
+        print(f"  Resmi Gazete beklenmeyen hata: {e}")
         break
 
 return results
@@ -299,48 +277,43 @@ return results
 
 def main():
 print(”=” * 50)
-print(“🚀 Sınav Duyuru Botu Başladı”)
-print(f”⏰ Zaman: {datetime.utcnow().isoformat()}”)
+print(“Sinav Duyuru Botu Basladi”)
+print(f”Zaman: {datetime.utcnow().isoformat()}”)
 print(”=” * 50)
 
 
-# Gönderilmiş haberleri yükle
 sent_ids = set()
 if os.path.exists(DATA_FILE):
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             sent_ids = set(json.load(f))
-        print(f"📂 Daha önce gönderilmiş {len(sent_ids)} haber yüklendi")
+        print(f"Daha once gonderilmis {len(sent_ids)} haber yuklendi")
     except Exception as e:
-        print(f"⚠️ sent_news.json okunamadı, sıfırdan başlıyor: {e}")
+        print(f"sent_news.json okunamadi, sifirdan basliyor: {e}")
 else:
-    print("📂 sent_news.json bulunamadı, yeni oluşturulacak")
+    print("sent_news.json bulunamadi, yeni olusturulacak")
 
 new_ids = []
 all_news = []
 
-# Tüm siteleri tara
-seen_urls = set()  # Aynı ÖSYM URL'sini iki kez tarama
+seen_urls = set()
 for url, source in SOURCES:
     if url in seen_urls:
         continue
     seen_urls.add(url)
 
-    print(f"\n🔎 {source} taranıyor...")
+    print(f"\n{source} taranıyor...")
     news = scrape_site(url, source)
     all_news.extend(news)
 
-# Resmî Gazete'yi tara
-print(f"\n🔎 Resmî Gazete taranıyor...")
+print("\nResmi Gazete taranıyor...")
 rg_news = scrape_resmi_gazete()
 all_news.extend(rg_news)
 
-print(f"\n📋 Toplam bulunan haber: {len(all_news)}")
+print(f"\nToplam bulunan haber: {len(all_news)}")
 
-# Yeni haberleri gönder
 for item in all_news:
     if item["id"] in sent_ids:
-        print(f"⏭️ Zaten gönderildi, atlanıyor: {item['title'][:60]}")
         continue
 
     exam_type = detect_exam_type(item["title"])
@@ -358,19 +331,18 @@ for item in all_news:
     sent_ids.add(item["id"])
     new_ids.append(item["id"])
 
-# Kaydet
 if new_ids:
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(list(sent_ids), f, indent=2, ensure_ascii=False)
-        print(f"\n💾 sent_news.json güncellendi")
+        print("\nsent_news.json guncellendi")
     except Exception as e:
-        print(f"⚠️ Kaydetme hatası: {e}")
+        print(f"Kaydetme hatasi: {e}")
 
 print("\n" + "=" * 50)
-print(f"✅ Tamamlandı! Yeni gönderilen bildirim: {len(new_ids)}")
+print(f"Tamamlandi! Yeni gonderilen bildirim: {len(new_ids)}")
 print("=" * 50)
 
 
-if *__name__* == “*__main__*”:
+if *__name__* == “*main__*”:
 main()

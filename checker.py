@@ -13,9 +13,6 @@ from urllib.parse import urljoin
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,/;q=0.8",
-    "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
 }
 
 PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID") or "naberr-6f4e4"
@@ -32,67 +29,38 @@ EXAMS = [
 
 SOURCES = [
     ("https://www.osym.gov.tr/TR,33759/2026.html", "OSYM"),
-    ("https://www.osym.gov.tr/TR,6/duyurular.html", "OSYM"),
     ("https://www.meb.gov.tr/meb_duyuruindex.php", "MEB"),
 ]
 
 RESMI_GAZETE_BASE = "https://www.resmigazete.gov.tr"
 
-# ================== TOKEN CACHE ==================
-
-_cached_token = None
-_token_expiry = None
+# ================== FIREBASE ==================
 
 def get_access_token():
-    global _cached_token, _token_expiry
-    now = datetime.utcnow()
-
-    if _cached_token and _token_expiry and now < _token_expiry:
-        return _cached_token
-
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE,
         scopes=["https://www.googleapis.com/auth/firebase.messaging"]
     )
     credentials.refresh(Request())
-
-    _cached_token = credentials.token
-    _token_expiry = now + timedelta(minutes=50)
-
-    return _cached_token
-
-# ================== FIREBASE ==================
+    return credentials.token
 
 def send_fcm(topic, data):
-    print(f"FCM gonderiliyor -> topic: {topic} | baslik: {data['title']}")
+    print(f"📣 FCM -> {topic} | {data['title']}")
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
-
+    
     payload = {
         "message": {
             "topic": topic,
             "notification": {
                 "title": data["title"],
-                "body": f"{data['examType']} - Yeni duyuru"
+                "body": f"{data['examType']} • Yeni duyuru"
             },
             "data": {
                 "examType": data["examType"],
                 "url": data["url"],
                 "source": data["source"]
             },
-            "android": {
-                "priority": "HIGH",
-                "notification": {
-                    "sound": "default",
-                    "channel_id": "exam_notifications"
-                }
-            },
-            "apns": {
-                "payload": {
-                    "aps": {
-                        "sound": "default"
-                    }
-                }
-            }
+            "android": {"priority": "HIGH"}
         }
     }
 
@@ -106,16 +74,12 @@ def send_fcm(topic, data):
             json=payload,
             timeout=15
         )
-
-        if res.status_code == 200:
-            print(f"Bildirim gonderildi: {data['title']}")
-        else:
-            print(f"FCM HATA [{res.status_code}]: {res.text}")
-
+        if res.status_code != 200:
+            print("❌ FCM HATA:", res.text)
     except Exception as e:
-        print(f"FCM istegi basarisiz: {e}")
+        print(f"❌ FCM Bağlantı Hatası: {e}")
 
-# ================== SCRAPER ==================
+# ================== SCRAPER TOOLS ==================
 
 def generate_news_id(title, source):
     raw = f"{title.lower().strip()}|{source.lower().strip()}"
@@ -132,139 +96,105 @@ def is_relevant_news(title):
     t = title.lower()
     return any(e in t for e in EXAMS)
 
+# ================== SCRAPERS ==================
+
 def scrape_site(url, source):
     results = []
-    print(f"  Baglaniliyor: {url}")
-
     try:
-        session = requests.Session()
-        session.headers.update(HEADERS)
-
-        r = session.get(url, timeout=20)
+        r = requests.get(url, headers=HEADERS, timeout=15)
         r.raise_for_status()
-        r.encoding = r.apparent_encoding
-
+        r.encoding = r.apparent_encoding # Karakter kodlamasını otomatik çöz
+        
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.find_all("a", href=True)
-        print(f"  Toplam link bulundu: {len(links)}")
 
-        found = 0
-        for a in links:
+        for a in links[:60]:
             title = " ".join(a.get_text().split()).strip()
-            link = a.get("href", "").strip()
+            link = a.get("href")
 
-            if not title or len(title) < 15:
-                continue
-            if not link or link.startswith("javascript:") or link == "#":
+            if not title or len(title) < 15 or not link:
                 continue
 
             link = urljoin(url, link)
 
             if is_relevant_news(title):
-                news_id = generate_news_id(title, source)
                 results.append({
-                    "id": news_id,
+                    "id": generate_news_id(title, source),
                     "title": title,
                     "link": link,
-                    "source": source,
-                    "createdAt": datetime.utcnow().isoformat()
+                    "source": source
                 })
-                found += 1
-                print(f"  Haber bulundu: {title[:80]}")
-
-        print(f"  {source}: {found} ilgili haber bulundu")
-
     except Exception as e:
-        print(f"  {source} hatasi: {e}")
-
+        print(f"❌ {source} hata: {e}")
     return results
 
-# ================== RESMI GAZETE SCRAPER ==================
-
 def scrape_resmi_gazete():
+    """Resmi Gazete'nin bugünkü sayısını tarar."""
     results = []
     source = "Resmi Gazete"
+    
+    # Bugünün tarihine göre URL oluştur (Örn: /eskiler/2024/05/20240522.htm)
+    now = datetime.utcnow() + timedelta(hours=3) # Türkiye saati ayarı
+    year, month, day = now.strftime("%Y"), now.strftime("%m"), now.strftime("%Y%m%d")
+    url = f"{RESMI_GAZETE_BASE}/eskiler/{year}/{month}/{day}.htm"
+    
+    print(f"🔎 Resmi Gazete taranıyor: {day} sayısı...")
 
-    dates_to_try = [
-        datetime.utcnow(),
-        datetime.utcnow() - timedelta(days=1),
-        datetime.utcnow() - timedelta(days=2),
-    ]
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        
+        # Eğer bugün henüz gazete çıkmadıysa veya hafta sonuysa 404 dönebilir
+        if r.status_code == 404:
+            print("ℹ️ Bugünün Resmi Gazete sayısı henüz yayınlanmadı.")
+            return results
+            
+        r.raise_for_status()
+        r.encoding = "windows-1254" # Resmi Gazete genelde bu kodlamayı kullanır
+        
+        soup = BeautifulSoup(r.text, "html.parser")
+        # Resmi Gazete'de duyurular genelde <a> etiketleri içindedir
+        links = soup.find_all("a", href=True)
 
-    for dt in dates_to_try:
-        year = dt.strftime("%Y")
-        month = dt.strftime("%m")
-        day = dt.strftime("%Y%m%d")
-        url = f"{RESMI_GAZETE_BASE}/eskiler/{year}/{month}/{day}.htm"
+        for a in links:
+            title = " ".join(a.get_text().split()).strip()
+            link = a.get("href")
 
-        print(f"  Resmi Gazete deneniyor: {url}")
-
-        try:
-            session = requests.Session()
-            session.headers.update(HEADERS)
-            r = session.get(url, timeout=20)
-
-            if r.status_code == 404:
+            if not title or len(title) < 15:
                 continue
 
-            r.raise_for_status()
-            r.encoding = "windows-1254"
+            # Linkleri tam URL'ye çevir
+            full_link = urljoin(url, link)
 
-            soup = BeautifulSoup(r.text, "html.parser")
-            links = soup.find_all("a", href=True)
-            
-            found = 0
-            for a in links:
-                title = " ".join(a.get_text().split()).strip()
-                link = a.get("href", "").strip()
-
-                if not title or len(title) < 15: continue
-                link = urljoin(url, link)
-
-                if is_relevant_news(title):
-                    news_id = generate_news_id(title, source)
-                    results.append({
-                        "id": news_id,
-                        "title": title,
-                        "link": link,
-                        "source": source,
-                        "createdAt": datetime.utcnow().isoformat()
-                    })
-                    found += 1
-
-            print(f"  Resmi Gazete {day}: {found} haber bulundu")
-            break
-
-        except Exception as e:
-            print(f"  Resmi Gazete hatasi: {e}")
-            break
-
+            if is_relevant_news(title):
+                results.append({
+                    "id": generate_news_id(title, source),
+                    "title": title,
+                    "link": full_link,
+                    "source": source
+                })
+    except Exception as e:
+        print(f"❌ Resmi Gazete hata: {e}")
+    
     return results
 
 # ================== MAIN ==================
 
 def main():
-    print("=" * 50)
-    print("Sinav Duyuru Botu Basladi")
-    print(f"Zaman: {datetime.utcnow().isoformat()}")
-    print("=" * 50)
-
     sent_ids = set()
     if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            try:
                 sent_ids = set(json.load(f))
-            print(f"Daha once gonderilmis {len(sent_ids)} haber yuklendi")
-        except Exception as e:
-            print(f"Veri dosyası hatası: {e}")
+            except: sent_ids = set()
 
     all_news = []
 
+    # Standart Kaynaklar (ÖSYM, MEB)
     for url, source in SOURCES:
-        print(f"\n{source} taranıyor...")
+        print(f"🔎 {source} taranıyor...")
         all_news.extend(scrape_site(url, source))
 
-    print("\nResmi Gazete taranıyor...")
+    # Resmi Gazete
     all_news.extend(scrape_resmi_gazete())
 
     new_count = 0
@@ -273,12 +203,16 @@ def main():
             continue
 
         exam_type = detect_exam_type(item["title"])
-        send_fcm(topic=exam_type.lower(), data={
-            "title": item["title"],
-            "examType": exam_type,
-            "url": item["link"],
-            "source": item["source"]
-        })
+        
+        send_fcm(
+            topic=exam_type.lower(),
+            data={
+                "title": item["title"],
+                "examType": exam_type,
+                "url": item["link"],
+                "source": item["source"]
+            }
+        )
 
         sent_ids.add(item["id"])
         new_count += 1
@@ -287,9 +221,7 @@ def main():
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(list(sent_ids), f, indent=2, ensure_ascii=False)
 
-    print("\n" + "=" * 50)
-    print(f"Tamamlandi! Yeni gonderilen: {new_count}")
-    print("=" * 50)
+    print(f"✅ İşlem tamamlandı. Yeni gönderilen bildirim: {new_count}")
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()

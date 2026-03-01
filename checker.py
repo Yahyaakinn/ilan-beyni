@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request
 from urllib.parse import urljoin
+import time
 
 # ================== CONFIG ==================
 
@@ -21,14 +22,14 @@ DATA_FILE = "sent_news.json"
 
 EXAMS = [
     "yks", "tyt", "ayt", "ydt",
-    "kpss", "ales", "dgs", "msu",
+    "kpss", "ales", "dgs", "msü",
     "yds", "e-yds", "tus", "ydus",
     "ekpss", "dhbt", "sts", "mbsts",
     "ags", "hmbsts"
 ]
 
 SOURCES = [
-    ("https://www.osym.gov.tr/TR,33759/2026.html", "OSYM"),
+    ("https://www.osym.gov.tr/TR,33759/2026.html", "ÖSYM"),
     ("https://www.meb.gov.tr/meb_duyuruindex.php", "MEB"),
 ]
 
@@ -37,14 +38,21 @@ RESMI_GAZETE_BASE = "https://www.resmigazete.gov.tr"
 # ================== FIREBASE ==================
 
 def get_access_token():
-    credentials = service_account.Credentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE,
-        scopes=["https://www.googleapis.com/auth/firebase.messaging"]
-    )
-    credentials.refresh(Request())
-    return credentials.token
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE,
+            scopes=["https://www.googleapis.com/auth/firebase.messaging"]
+        )
+        credentials.refresh(Request())
+        return credentials.token
+    except Exception as e:
+        print(f"❌ Kimlik doğrulama hatası: {e}")
+        return None
 
 def send_fcm(topic, data):
+    token = get_access_token()
+    if not token: return
+
     print(f"📣 FCM -> {topic} | {data['title']}")
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
     
@@ -67,12 +75,9 @@ def send_fcm(topic, data):
     try:
         res = requests.post(
             url,
-            headers={
-                "Authorization": f"Bearer {get_access_token()}",
-                "Content-Type": "application/json"
-            },
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json=payload,
-            timeout=15
+            timeout=20
         )
         if res.status_code != 200:
             print("❌ FCM HATA:", res.text)
@@ -101,9 +106,9 @@ def is_relevant_news(title):
 def scrape_site(url, source):
     results = []
     try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=HEADERS, timeout=25)
         r.raise_for_status()
-        r.encoding = r.apparent_encoding # Karakter kodlamasını otomatik çöz
+        r.encoding = r.apparent_encoding
         
         soup = BeautifulSoup(r.text, "html.parser")
         links = soup.find_all("a", href=True)
@@ -111,12 +116,9 @@ def scrape_site(url, source):
         for a in links[:60]:
             title = " ".join(a.get_text().split()).strip()
             link = a.get("href")
-
-            if not title or len(title) < 15 or not link:
-                continue
-
+            if not title or len(title) < 15 or not link: continue
+            
             link = urljoin(url, link)
-
             if is_relevant_news(title):
                 results.append({
                     "id": generate_news_id(title, source),
@@ -129,51 +131,43 @@ def scrape_site(url, source):
     return results
 
 def scrape_resmi_gazete():
-    """Resmi Gazete'nin bugünkü sayısını tarar."""
     results = []
     source = "Resmi Gazete"
-    
-    # Bugünün tarihine göre URL oluştur (Örn: /eskiler/2024/05/20240522.htm)
-    now = datetime.utcnow() + timedelta(hours=3) # Türkiye saati ayarı
+    now = datetime.utcnow() + timedelta(hours=3)
     year, month, day = now.strftime("%Y"), now.strftime("%m"), now.strftime("%Y%m%d")
     url = f"{RESMI_GAZETE_BASE}/eskiler/{year}/{month}/{day}.htm"
     
     print(f"🔎 Resmi Gazete taranıyor: {day} sayısı...")
 
-    try:
-        r = requests.get(url, headers=HEADERS, timeout=15)
-        
-        # Eğer bugün henüz gazete çıkmadıysa veya hafta sonuysa 404 dönebilir
-        if r.status_code == 404:
-            print("ℹ️ Bugünün Resmi Gazete sayısı henüz yayınlanmadı.")
-            return results
+    # Bağlantı kopmalarına karşı 3 deneme hakkı
+    for attempt in range(3):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=30)
+            if r.status_code == 404:
+                print("ℹ️ Bugünün Resmi Gazete sayısı henüz yayınlanmadı.")
+                return results
+            r.raise_for_status()
+            r.encoding = "windows-1254"
             
-        r.raise_for_status()
-        r.encoding = "windows-1254" # Resmi Gazete genelde bu kodlamayı kullanır
-        
-        soup = BeautifulSoup(r.text, "html.parser")
-        # Resmi Gazete'de duyurular genelde <a> etiketleri içindedir
-        links = soup.find_all("a", href=True)
-
-        for a in links:
-            title = " ".join(a.get_text().split()).strip()
-            link = a.get("href")
-
-            if not title or len(title) < 15:
-                continue
-
-            # Linkleri tam URL'ye çevir
-            full_link = urljoin(url, link)
-
-            if is_relevant_news(title):
-                results.append({
-                    "id": generate_news_id(title, source),
-                    "title": title,
-                    "link": full_link,
-                    "source": source
-                })
-    except Exception as e:
-        print(f"❌ Resmi Gazete hata: {e}")
+            soup = BeautifulSoup(r.text, "html.parser")
+            links = soup.find_all("a", href=True)
+            for a in links:
+                title = " ".join(a.get_text().split()).strip()
+                link = a.get("href")
+                if not title or len(title) < 15: continue
+                
+                full_link = urljoin(url, link)
+                if is_relevant_news(title):
+                    results.append({
+                        "id": generate_news_id(title, source),
+                        "title": title,
+                        "link": full_link,
+                        "source": source
+                    })
+            break # Başarılı olursa döngüden çık
+        except Exception as e:
+            print(f"⚠️ Deneme {attempt+1} başarısız (Resmi Gazete): {e}")
+            time.sleep(5) # 5 saniye bekle ve tekrar dene
     
     return results
 
@@ -188,32 +182,23 @@ def main():
             except: sent_ids = set()
 
     all_news = []
-
-    # Standart Kaynaklar (ÖSYM, MEB)
     for url, source in SOURCES:
         print(f"🔎 {source} taranıyor...")
         all_news.extend(scrape_site(url, source))
 
-    # Resmi Gazete
     all_news.extend(scrape_resmi_gazete())
 
     new_count = 0
     for item in all_news:
-        if item["id"] in sent_ids:
-            continue
+        if item["id"] in sent_ids: continue
 
         exam_type = detect_exam_type(item["title"])
-        
-        send_fcm(
-            topic=exam_type.lower(),
-            data={
-                "title": item["title"],
-                "examType": exam_type,
-                "url": item["link"],
-                "source": item["source"]
-            }
-        )
-
+        send_fcm(topic=exam_type.lower(), data={
+            "title": item["title"],
+            "examType": exam_type,
+            "url": item["link"],
+            "source": item["source"]
+        })
         sent_ids.add(item["id"])
         new_count += 1
 
